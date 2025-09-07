@@ -1,83 +1,67 @@
+const express = require("express");
 const makeWASocket = require("@whiskeysockets/baileys").default;
 const { useMultiFileAuthState } = require("@whiskeysockets/baileys");
-const qrcode = require("qrcode-terminal");
-const express = require("express");
+const qrcode = require("qrcode");
 
-console.log("🚀 Initializing WhatsApp bot...");
-
-// Express server for Railway health check
 const app = express();
 const PORT = process.env.PORT || 8080;
-app.get("/", (req, res) => res.send("✅ WhatsApp bot is running"));
-app.listen(PORT, () => console.log(`🌐 Express server running on port ${PORT}`));
 
-async function startBot() {
-  const { state, saveCreds } = await useMultiFileAuthState("baileys_auth");
+let currentQR = null; // Store QR temporarily
+
+(async () => {
+  const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
 
   const sock = makeWASocket({
     auth: state,
+    printQRInTerminal: false, // Disable broken ASCII QR
   });
 
-  sock.ev.on("creds.update", saveCreds);
-
-  // ✅ Handle QR manually
+  // Handle connection updates
   sock.ev.on("connection.update", (update) => {
     const { connection, qr } = update;
+
     if (qr) {
-      console.log("📱 Scan this QR to log in:");
-      qrcode.generate(qr, { small: true });
+      currentQR = qr; // Save the latest QR
+      console.log("📱 New QR generated. Open /qr in browser to scan.");
     }
+
     if (connection === "open") {
-      console.log("✅ WhatsApp connection established!");
-    }
-    if (connection === "close") {
-      console.log("⚠️ Connection closed, reconnecting...");
-      startBot();
+      console.log("✅ WhatsApp bot connected and running!");
+      currentQR = null; // Clear QR once logged in
     }
   });
 
-  // When messages arrive
+  // Save creds automatically
+  sock.ev.on("creds.update", saveCreds);
+
+  // Example listener
   sock.ev.on("messages.upsert", async ({ messages }) => {
     const msg = messages[0];
-    if (!msg.message || msg.key.remoteJid === "status@broadcast") return;
+    if (!msg.message) return;
 
     const from = msg.key.remoteJid;
-    const body =
-      msg.message.conversation ||
-      msg.message.extendedTextMessage?.text ||
-      "";
+    const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
 
-    console.log(`📩 Message: "${body}" from ${from}`);
+    console.log(`📩 Message from ${from}: ${text}`);
 
-    // Only work in groups
-    if (!from.endsWith("@g.us")) return;
-
-    if (body === "/everyone") {
-      // Get group metadata
-      const metadata = await sock.groupMetadata(from);
-      const participants = metadata.participants;
-
-      // Find sender
-      const sender = msg.key.participant || msg.key.remoteJid;
-      const senderInfo = participants.find((p) => p.id === sender);
-
-      if (!senderInfo?.admin) {
-        console.log("❌ Sender is not an admin, ignoring.");
-        return;
-      }
-
-      // Build mentions
-      const mentions = participants.map((p) => p.id);
-      const text = "Hello everyone!";
-
-      await sock.sendMessage(from, {
-        text,
-        mentions,
-      });
-
-      console.log("✅ Message sent with mentions");
+    if (text?.toLowerCase() === "/ping") {
+      await sock.sendMessage(from, { text: "🏓 Pong!" });
     }
   });
-}
+})();
 
-startBot();
+// Serve QR code as PNG
+app.get("/qr", async (req, res) => {
+  if (!currentQR) {
+    return res.send("✅ No QR available. Bot may already be logged in.");
+  }
+  res.setHeader("Content-Type", "image/png");
+  res.send(await qrcode.toBuffer(currentQR));
+});
+
+// Keep Railway container alive
+app.get("/", (req, res) => res.send("🚀 WhatsApp Bot is running"));
+
+app.listen(PORT, () => {
+  console.log(`🌐 Express server running on port ${PORT}`);
+});
