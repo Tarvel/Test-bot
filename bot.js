@@ -16,10 +16,25 @@ async function startBot() {
 
   const sock = makeWASocket({
     auth: state,
-    printQRInTerminal: true, // prints QR in logs
   });
 
   sock.ev.on("creds.update", saveCreds);
+
+  // ✅ Handle QR manually
+  sock.ev.on("connection.update", (update) => {
+    const { connection, qr } = update;
+    if (qr) {
+      console.log("📱 Scan this QR to log in:");
+      qrcode.generate(qr, { small: true });
+    }
+    if (connection === "open") {
+      console.log("✅ WhatsApp connection established!");
+    }
+    if (connection === "close") {
+      console.log("⚠️ Connection closed, reconnecting...");
+      startBot();
+    }
+  });
 
   // When messages arrive
   sock.ev.on("messages.upsert", async ({ messages }) => {
