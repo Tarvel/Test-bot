@@ -1,20 +1,45 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
+const express = require('express');
 
-console.log('Initializing WhatsApp bot...');
+console.log('🚀 Initializing WhatsApp bot...');
 
+// --- Express setup ---
+const app = express();
+let latestQR = null;
+
+app.get('/', (req, res) => {
+    res.send('✅ WhatsApp bot is running. Visit /qr to get the QR code.');
+});
+
+app.get('/qr', (req, res) => {
+    if (!latestQR) {
+        return res.send('⚠️ QR not generated yet. Please wait and refresh.');
+    }
+    // Render QR as image using free API
+    res.send(`<h2>Scan this QR with WhatsApp</h2>
+              <img src="https://api.qrserver.com/v1/create-qr-code/?data=${latestQR}&size=300x300"/>`);
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`🌐 Express server running on port ${PORT}`);
+});
+
+// --- WhatsApp client setup ---
 const client = new Client({
     authStrategy: new LocalAuth(),
     takeoverOnConflict: true,
     puppeteer: {
-        headless: "new", // stable in recent Chromium versions
+        headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox']
     }
 });
 
 // Generate QR for login
 client.on('qr', (qr) => {
-    console.log('Scan this QR Code with WhatsApp:');
+    latestQR = qr;
+    console.log('📲 Scan this QR Code with WhatsApp:');
     qrcode.generate(qr, { small: true });
 });
 
@@ -77,7 +102,7 @@ client.on('message_create', async (message) => {
 // Handle disconnection
 client.on('disconnected', (reason) => {
     console.log('⚠️ Client was logged out:', reason);
-    process.exit(1); // let PM2/Docker/systemd restart it
+    process.exit(1); // let Railway restart it
 });
 
 // Keep session alive
